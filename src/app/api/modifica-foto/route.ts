@@ -38,7 +38,7 @@ Rispondi SOLO con il prompt inglese, max 20 parole, nessun testo aggiuntivo.`,
         },
         body: JSON.stringify({
           prompt: prompt,
-          image: [...Buffer.from(base64Data, "base64")],
+          image_b64: base64Data,
           strength: 0.75,
           num_steps: 8,
           guidance: 7.5,
