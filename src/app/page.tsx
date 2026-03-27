@@ -93,16 +93,21 @@ export default function HomePage() {
     image.onload = () => {
       ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-      const scale = Math.max(
-        CANVAS_WIDTH / image.width,
-        CANVAS_HEIGHT / image.height
+      const scale = Math.min(
+        canvas.width / image.naturalWidth,
+        canvas.height / image.naturalHeight
       );
-      const scaledWidth = image.width * scale;
-      const scaledHeight = image.height * scale;
-      const dx = (CANVAS_WIDTH - scaledWidth) / 2;
-      const dy = (CANVAS_HEIGHT - scaledHeight) / 2;
 
-      ctx.drawImage(image, dx, dy, scaledWidth, scaledHeight);
+      const drawWidth = image.naturalWidth * scale;
+      const drawHeight = image.naturalHeight * scale;
+
+      const offsetX = (canvas.width - drawWidth) / 2;
+      const offsetY = (canvas.height - drawHeight) / 2;
+
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.drawImage(image, offsetX, offsetY, drawWidth, drawHeight);
       ctx.font = "bold 48px Impact, Arial Black, sans-serif";
 
       if (style === "classico") {
