@@ -29,7 +29,7 @@ Rispondi SOLO con il prompt inglese, max 20 parole, nessun testo aggiuntivo.`,
     const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
 
     const cfRes = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID}/ai/run/@cf/lykon/dreamshaper-8-lcm`,
+      `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID}/ai/run/@cf/stabilityai/stable-diffusion-xl-base-1.0`,
       {
         method: "POST",
         headers: {
@@ -38,10 +38,11 @@ Rispondi SOLO con il prompt inglese, max 20 parole, nessun testo aggiuntivo.`,
         },
         body: JSON.stringify({
           prompt: prompt,
+                    negative_prompt: "blurry, low quality, distorted, ugly, deformed",
           image_b64: base64Data,
-          strength: 0.75,
-          num_steps: 8,
-          guidance: 7.5,
+          strength: 0.55,
+          num_steps: 20,
+          guidance: 8,
         }),
       }
     );
