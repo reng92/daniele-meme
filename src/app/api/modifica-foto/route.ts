@@ -8,70 +8,92 @@ export async function POST(req: NextRequest) {
   try {
     const { imageBase64, istruzione, imageUrl } = await req.json();
 
-    // Step 1: Groq Vision descrive la foto
     const urlPerVision = imageUrl ?? imageBase64;
+
+    // Step 1: Groq Vision descrive la foto in inglese
     const visionRes = await groq.chat.completions.create({
       model: "meta-llama/llama-4-scout-17b-16e-instruct",
       messages: [{
         role: "user",
         content: [
           { type: "image_url", image_url: { url: urlPerVision } },
-          { type: "text", text: "Describe this photo in English precisely: subjects, background, colors, lighting. Max 30 words." }
+          { type: "text", text: "Describe this photo in English: subjects, background, colors, style. Max 30 words." }
         ]
       }],
       max_tokens: 80,
     });
     const descrizione = visionRes.choices[0].message.content ?? "";
 
-    // Step 2: Groq genera prompt SD con la modifica richiesta
+    // Step 2: Groq costruisce il prompt di modifica per FLUX Kontext
     const promptRes = await groq.chat.completions.create({
       model: "llama-3.3-70b-versatile",
       messages: [{
         role: "user",
-        content: `Scene: "${descrizione}". Apply this modification: "${istruzione}".
-Write an optimized Stable Diffusion prompt in English, max 25 words. Only the prompt, nothing else.`
+        content: `You are a FLUX.1 Kontext prompt expert.
+Current image: "${descrizione}"
+User wants to modify it: "${istruzione}"
+
+Write a FLUX Kontext editing instruction in English.
+Rules: be specific about what to ADD/CHANGE/REMOVE, keep everything else unchanged.
+Example format: "Add [X] to [subject]. Keep the background and lighting identical."
+Max 30 words. Only the instruction, nothing else.`
       }],
-      max_tokens: 60,
+      max_tokens: 80,
     });
-    const finalPrompt = promptRes.choices[0].message.content?.trim() ?? descrizione;
+    const editPrompt = promptRes.choices[0].message.content?.trim() ?? istruzione;
 
-    // Step 3: Converti base64 in Uint8Array (formato richiesto da CF)
-    const base64Data = imageBase64
-      ? imageBase64.replace(/^data:image\/\w+;base64,/, "")
-      : await fetch(imageUrl).then((r) => r.arrayBuffer()).then((b) => Buffer.from(b).toString("base64"));
-
-    const imageArray = [...new Uint8Array(Buffer.from(base64Data, "base64"))];
-
-    // Step 4: Cloudflare stable-diffusion-v1-5-img2img
-    const cfRes = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID}/ai/run/@cf/runwayml/stable-diffusion-v1-5-img2img`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.CF_API_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          prompt: finalPrompt,
-          negative_prompt: "blurry, low quality, distorted, ugly, deformed",
-          image: imageArray,
-          strength: 0.6,
-          num_steps: 20,
-          guidance: 7.5,
-        }),
-      }
-    );
-
-    if (!cfRes.ok) {
-      const err = await cfRes.text();
-      throw new Error(`Cloudflare error: ${err}`);
+    // Step 3: Converti immagine in base64 pura (senza prefisso)
+    let imageB64: string;
+    if (imageBase64) {
+      imageB64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+    } else {
+      const r = await fetch(imageUrl);
+      const buf = await r.arrayBuffer();
+      imageB64 = Buffer.from(buf).toString("base64");
     }
 
-    // Cloudflare restituisce l'immagine come binario
-    const arrayBuffer = await cfRes.arrayBuffer();
-    const outputBase64 = `data:image/png;base64,${Buffer.from(arrayBuffer).toString("base64")}`;
+    // Step 4: Together AI - FLUX.1 Kontext Dev
+    const togetherRes = await fetch("https://api.together.xyz/v1/images/generations", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.TOGETHER_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "black-forest-labs/FLUX.1-kontext-dev",
+        prompt: editPrompt,
+        image_base64: imageB64,
+        width: 800,
+        height: 600,
+        steps: 28,
+        n: 1,
+      }),
+    });
 
-    return NextResponse.json({ imageModificata: outputBase64 });
+    if (!togetherRes.ok) {
+      const err = await togetherRes.text();
+      console.error("Together error:", err);
+      throw new Error(`Together AI error: ${err}`);
+    }
+
+    const data = await togetherRes.json();
+
+    // Together restituisce URL o base64
+    const result = data.data?.[0];
+    let outputImage: string;
+
+    if (result?.b64_json) {
+      outputImage = `data:image/png;base64,${result.b64_json}`;
+    } else if (result?.url) {
+      outputImage = result.url;
+    } else {
+      throw new Error("Nessuna immagine restituita da Together AI");
+    }
+
+    return NextResponse.json({
+      imageModificata: outputImage,
+      promptUsato: editPrompt
+    });
   } catch (err: unknown) {
     console.error(err);
     return NextResponse.json(
