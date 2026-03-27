@@ -12,19 +12,6 @@ interface MemeState {
   bottomText: string;
 }
 
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  let binary = "";
-  const bytes = new Uint8Array(buffer);
-  const chunkSize = 0x8000;
-
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    const chunk = bytes.subarray(i, i + chunkSize);
-    binary += String.fromCharCode(...chunk);
-  }
-
-  return btoa(binary);
-}
-
 export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const canvasBattaglia2Ref = useRef<HTMLCanvasElement>(null);
@@ -32,12 +19,10 @@ export default function Home() {
   const [dark, setDark] = useState(true);
   const [stile, setStile] = useState<Stile>("classico");
   const [loading, setLoading] = useState(false);
-  const [loadingModifica, setLoadingModifica] = useState(false);
   const [scurrile, setScurrile] = useState(false);
   const [napoletano, setNapoletano] = useState(false);
   const [assurdita, setAssurdita] = useState(5);
   const [captionCustom, setCaptionCustom] = useState("");
-  const [istruzione, setIstruzione] = useState("");
   const [uploadedBase64, setUploadedBase64] = useState<string | null>(null);
   const [uploadedFilename, setUploadedFilename] = useState<string | null>(null);
   const [currentMeme, setCurrentMeme] = useState<MemeState | null>(null);
@@ -203,41 +188,6 @@ export default function Home() {
     const bottom = parole.length > 4 ? parole.slice(meta).join(" ") : captionCustom;
     const meme = { ...currentMeme, topText: top, bottomText: bottom };
     setCurrentMeme(meme);
-  };
-
-  const modificaFotoAI = async () => {
-    if (!istruzione.trim()) return;
-    setErrorMsg(null);
-    setLoadingModifica(true);
-    try {
-      const imageBase64 = uploadedBase64 ?? currentMeme?.imageUrl;
-      if (!imageBase64) throw new Error("Nessuna foto");
-
-      let base64: string;
-      if (imageBase64.startsWith("data:")) {
-        base64 = imageBase64;
-      } else {
-        const r = await fetch(imageBase64);
-        const buf = await r.arrayBuffer();
-        base64 = `data:image/jpeg;base64,${arrayBufferToBase64(buf)}`;
-      }
-
-      const res = await fetch("/api/modifica-foto", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageBase64: base64, istruzione }),
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-
-      setUploadedBase64(data.imageModificata);
-      setUploadedFilename("foto-modificata");
-      if (currentMeme) setCurrentMeme({ ...currentMeme, imageUrl: data.imageModificata });
-    } catch (e: unknown) {
-      setErrorMsg(e instanceof Error ? e.message : "Errore modifica");
-    } finally {
-      setLoadingModifica(false);
-    }
   };
 
   const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -408,39 +358,6 @@ export default function Home() {
               La foto caricata sara usata al posto di quelle random
             </p>
           )}
-        </div>
-
-        <div className={`rounded-2xl border ${card} p-4 mb-4`}>
-          <p className="font-bold mb-1">Modifica foto con AI</p>
-          <p className="text-xs text-gray-500 mb-3">
-            Powered by Hugging Face - La foto viene trasformata visivamente dall&apos;AI
-          </p>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={istruzione}
-              onChange={(e) => setIstruzione(e.target.value)}
-              placeholder="Es: aggiungi occhiali da sole, metti un cappello..."
-              className={`flex-1 rounded-xl px-3 py-2 text-sm border ${card} bg-transparent`}
-            />
-            <button
-              onClick={modificaFotoAI}
-              disabled={loadingModifica || (!uploadedBase64 && !currentMeme)}
-              className={`${btn} bg-purple-600 text-white whitespace-nowrap`}
-            >
-              {loadingModifica ? "Modifica..." : "Modifica"}
-            </button>
-            <button
-              onClick={() => generaMeme(true)}
-              disabled={loading || !currentMeme}
-              className={`${btn} bg-[#FFD700] text-black whitespace-nowrap`}
-            >
-              Genera Meme
-            </button>
-          </div>
-          <p className="text-xs text-gray-500 mt-2">
-            Il modello puo impiegare 20-40 secondi al primo avvio (cold start)
-          </p>
         </div>
 
         <div className={`rounded-2xl border ${card} p-4 mb-4`}>
