@@ -1,60 +1,61 @@
 import { NextRequest, NextResponse } from "next/server";
+import Groq from "groq-sdk";
 
 export const maxDuration = 60;
+
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 export async function POST(req: NextRequest) {
   try {
     const { imageBase64, istruzione } = await req.json();
 
-    // Rimuovi il prefisso data:image/...;base64,
-    const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
-    const mimeType = imageBase64.match(/^data:(image\/\w+);base64,/)?.[1] ?? "image/jpeg";
+    // Step 1: Groq traduce la richiesta in prompt ottimizzato per SD
+    const promptRes = await groq.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        {
+          role: "user",
+          content: `Traduci questa richiesta di modifica foto in un prompt in inglese ottimizzato per Stable Diffusion img2img.
+Richiesta utente: "${istruzione}"
+Rispondi SOLO con il prompt inglese, max 20 parole, nessun testo aggiuntivo.`,
+        },
+      ],
+      max_tokens: 60,
+    });
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=${process.env.GEMINI_API_KEY}`,
+    const prompt = promptRes.choices[0].message.content?.trim() ?? istruzione;
+
+    // Step 2: Cloudflare Workers AI img2img
+    const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+
+    const cfRes = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID}/ai/run/@cf/lykon/dreamshaper-8-lcm`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          Authorization: `Bearer ${process.env.CF_API_TOKEN}`,
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  inline_data: {
-                    mime_type: mimeType,
-                    data: base64Data,
-                  },
-                },
-                {
-                  text: `Modifica questa foto: ${istruzione}. Mantieni tutto il resto invariato, cambia SOLO quello che ho chiesto.`,
-                },
-              ],
-            },
-          ],
-          generationConfig: {
-            responseModalities: ["IMAGE", "TEXT"],
-          },
+          prompt: prompt,
+          image: [...Buffer.from(base64Data, "base64")],
+          strength: 0.75,
+          num_steps: 8,
+          guidance: 7.5,
         }),
       }
     );
 
-    if (!response.ok) {
-      const err = await response.text();
-      console.error("Gemini error:", err);
-      throw new Error(`Gemini error: ${err}`);
+    if (!cfRes.ok) {
+      const err = await cfRes.text();
+      console.error("CF error:", err);
+      throw new Error(`Cloudflare error: ${err}`);
     }
 
-    const data = await response.json();
+    // Cloudflare restituisce l'immagine come binario
+    const arrayBuffer = await cfRes.arrayBuffer();
+    const outputBase64 = `data:image/png;base64,${Buffer.from(arrayBuffer).toString("base64")}`;
 
-    // Estrai l'immagine modificata dalla risposta
-    const parts = data.candidates?.[0]?.content?.parts ?? [];
-    const imagePart = parts.find((p: { inlineData?: { mimeType: string; data: string } }) => p.inlineData);
-
-    if (!imagePart) {
-      throw new Error("Gemini non ha restituito un'immagine");
-    }
-
-    const outputBase64 = `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`;
     return NextResponse.json({ imageModificata: outputBase64 });
 
   } catch (err: unknown) {
