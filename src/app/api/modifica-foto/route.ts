@@ -7,7 +7,7 @@ export async function POST(req: NextRequest) {
     const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
 
     const hfRes = await fetch(
-      "https://api-inference.huggingface.co/models/timbrooks/instruct-pix2pix",
+      "https://router.huggingface.co/hf-inference/models/timbrooks/instruct-pix2pix",
       {
         method: "POST",
         headers: {
