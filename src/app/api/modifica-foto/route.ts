@@ -1,48 +1,67 @@
 import { NextRequest, NextResponse } from "next/server";
 
+export const maxDuration = 60;
+
 export async function POST(req: NextRequest) {
   try {
     const { imageBase64, istruzione } = await req.json();
 
+    // Rimuovi il prefisso data:image/...;base64,
     const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+    const mimeType = imageBase64.match(/^data:(image\/\w+);base64,/)?.[1] ?? "image/jpeg";
 
-    const hfRes = await fetch(
-      "https://router.huggingface.co/hf-inference/models/timbrooks/instruct-pix2pix",
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp-image-generation:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.HF_TOKEN}`,
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          inputs: istruzione,
-          image: base64Data,
-          parameters: {
-            num_inference_steps: 20,
-            image_guidance_scale: 1.5,
-            guidance_scale: 7,
+          contents: [
+            {
+              parts: [
+                {
+                  inline_data: {
+                    mime_type: mimeType,
+                    data: base64Data,
+                  },
+                },
+                {
+                  text: `Modifica questa foto: ${istruzione}. Mantieni tutto il resto invariato, cambia SOLO quello che ho chiesto.`,
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            responseModalities: ["IMAGE", "TEXT"],
           },
         }),
       }
     );
 
-    if (!hfRes.ok) {
-      const errText = await hfRes.text();
-      if (errText.includes("loading")) {
-        return NextResponse.json(
-          { error: "Il modello si sta avviando, riprova tra 20 secondi" },
-          { status: 503 }
-        );
-      }
-      throw new Error(`HF error: ${errText}`);
+    if (!response.ok) {
+      const err = await response.text();
+      console.error("Gemini error:", err);
+      throw new Error(`Gemini error: ${err}`);
     }
 
-    const arrayBuffer = await hfRes.arrayBuffer();
-    const outputBase64 = `data:image/jpeg;base64,${Buffer.from(arrayBuffer).toString("base64")}`;
+    const data = await response.json();
 
+    // Estrai l'immagine modificata dalla risposta
+    const parts = data.candidates?.[0]?.content?.parts ?? [];
+    const imagePart = parts.find((p: { inlineData?: { mimeType: string; data: string } }) => p.inlineData);
+
+    if (!imagePart) {
+      throw new Error("Gemini non ha restituito un'immagine");
+    }
+
+    const outputBase64 = `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`;
     return NextResponse.json({ imageModificata: outputBase64 });
+
   } catch (err: unknown) {
     console.error(err);
-    return NextResponse.json({ error: "Errore modifica foto" }, { status: 500 });
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Errore modifica foto" },
+      { status: 500 }
+    );
   }
 }
