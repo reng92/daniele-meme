@@ -1,294 +1,532 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
 import { MEMES } from "../../lib/memes";
 
-type MemeStyle = "classico" | "moderno" | "speech";
+type Stile = "classico" | "moderno" | "bubble";
 
-type ApiResponse = {
-  caption: string;
+interface MemeState {
+  filename: string;
+  imageUrl: string;
   topText: string;
   bottomText: string;
-};
-
-const CANVAS_WIDTH = 800;
-const CANVAS_HEIGHT = 600;
-
-function pickRandomMeme(exclude?: string): string {
-  const pool = MEMES.filter((meme) => meme !== exclude);
-  const list = pool.length > 0 ? pool : MEMES;
-  return list[Math.floor(Math.random() * list.length)];
 }
 
-function drawOutlinedText(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  x: number,
-  y: number
-) {
-  ctx.strokeStyle = "#000000";
-  ctx.lineWidth = 6;
-  ctx.fillStyle = "#ffffff";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "top";
-  ctx.strokeText(text.toUpperCase(), x, y);
-  ctx.fillText(text.toUpperCase(), x, y);
-}
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
 
-function drawRoundRect(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  radius: number
-) {
-  ctx.beginPath();
-  ctx.moveTo(x + radius, y);
-  ctx.lineTo(x + width - radius, y);
-  ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
-  ctx.lineTo(x + width, y + height - radius);
-  ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
-  ctx.lineTo(x + radius, y + height);
-  ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
-  ctx.lineTo(x, y + radius);
-  ctx.quadraticCurveTo(x, y, x + radius, y);
-  ctx.closePath();
-}
-
-export default function HomePage() {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [theme, setTheme] = useState<"light" | "dark">("dark");
-  const [style, setStyle] = useState<MemeStyle>("classico");
-  const [selectedMeme, setSelectedMeme] = useState<string>(MEMES[0]);
-  const [topText, setTopText] = useState<string>("");
-  const [bottomText, setBottomText] = useState<string>("");
-  const [loading, setLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string>("");
-
-  const cardStyle = useMemo(
-    () => ({ backgroundColor: "var(--card)", color: "var(--fg)" }),
-    []
-  );
-
-  useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-  }, [theme]);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !selectedMeme) {
-      return;
-    }
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) {
-      return;
-    }
-
-    const image = new Image();
-    image.crossOrigin = "anonymous";
-    image.src = selectedMeme;
-
-    image.onload = () => {
-      ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-      const scale = Math.min(
-        canvas.width / image.naturalWidth,
-        canvas.height / image.naturalHeight
-      );
-
-      const drawWidth = image.naturalWidth * scale;
-      const drawHeight = image.naturalHeight * scale;
-
-      const offsetX = (canvas.width - drawWidth) / 2;
-      const offsetY = (canvas.height - drawHeight) / 2;
-
-      ctx.fillStyle = "#000000";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      ctx.drawImage(image, offsetX, offsetY, drawWidth, drawHeight);
-      ctx.font = "bold 48px Impact, Arial Black, sans-serif";
-
-      if (style === "classico") {
-        drawOutlinedText(ctx, topText, CANVAS_WIDTH / 2, 20);
-        drawOutlinedText(ctx, bottomText, CANVAS_WIDTH / 2, CANVAS_HEIGHT - 80);
-      }
-
-      if (style === "moderno") {
-        ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
-        ctx.fillRect(0, CANVAS_HEIGHT - 180, CANVAS_WIDTH, 180);
-
-        ctx.font = "bold 42px Impact, Arial Black, sans-serif";
-        drawOutlinedText(ctx, topText, CANVAS_WIDTH / 2, CANVAS_HEIGHT - 165);
-
-        ctx.font = "bold 36px Impact, Arial Black, sans-serif";
-        drawOutlinedText(ctx, bottomText, CANVAS_WIDTH / 2, CANVAS_HEIGHT - 95);
-      }
-
-      if (style === "speech") {
-        ctx.fillStyle = "rgba(0, 0, 0, 0.2)";
-        ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-        const bubbleX = 70;
-        const bubbleY = 40;
-        const bubbleWidth = CANVAS_WIDTH - 140;
-        const bubbleHeight = 190;
-        drawRoundRect(ctx, bubbleX, bubbleY, bubbleWidth, bubbleHeight, 28);
-        ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
-        ctx.fill();
-
-        ctx.font = "bold 44px Impact, Arial Black, sans-serif";
-        ctx.fillStyle = "#111111";
-        ctx.textAlign = "center";
-        ctx.fillText(topText.toUpperCase(), CANVAS_WIDTH / 2, bubbleY + 28);
-        ctx.fillText(bottomText.toUpperCase(), CANVAS_WIDTH / 2, bubbleY + 95);
-      }
-    };
-  }, [selectedMeme, topText, bottomText, style]);
-
-  async function generateCaption(filename: string, selectedStyle: MemeStyle) {
-    const response = await fetch("/api/genera-meme", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        filename,
-        style: selectedStyle
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error("Errore durante la generazione del testo");
-    }
-
-    return (await response.json()) as ApiResponse;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
   }
 
-  async function onGenerate(newPhoto: boolean) {
+  return btoa(binary);
+}
+
+export default function Home() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasBattaglia2Ref = useRef<HTMLCanvasElement>(null);
+
+  const [dark, setDark] = useState(true);
+  const [stile, setStile] = useState<Stile>("classico");
+  const [loading, setLoading] = useState(false);
+  const [loadingModifica, setLoadingModifica] = useState(false);
+  const [scurrile, setScurrile] = useState(false);
+  const [napoletano, setNapoletano] = useState(false);
+  const [assurdita, setAssurdita] = useState(5);
+  const [captionCustom, setCaptionCustom] = useState("");
+  const [istruzione, setIstruzione] = useState("");
+  const [uploadedBase64, setUploadedBase64] = useState<string | null>(null);
+  const [uploadedFilename, setUploadedFilename] = useState<string | null>(null);
+  const [currentMeme, setCurrentMeme] = useState<MemeState | null>(null);
+  const [storia, setStoria] = useState<MemeState[]>([]);
+  const [modalitaBattaglia, setModalitaBattaglia] = useState(false);
+  const [meme2, setMeme2] = useState<MemeState | null>(null);
+  const [vincitore, setVincitore] = useState<1 | 2 | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const disegnaCanvas = useCallback(
+    (
+      ref: React.RefObject<HTMLCanvasElement | null>,
+      imageUrl: string,
+      top: string,
+      bottom: string
+    ) => {
+      const canvas = ref.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.src = imageUrl;
+      img.onload = () => {
+        canvas.width = 800;
+        canvas.height = 600;
+
+        const scale = Math.min(800 / img.naturalWidth, 600 / img.naturalHeight);
+        const dw = img.naturalWidth * scale;
+        const dh = img.naturalHeight * scale;
+        const ox = (800 - dw) / 2;
+        const oy = (600 - dh) / 2;
+
+        ctx.fillStyle = dark ? "#0f0f0f" : "#f5f5f5";
+        ctx.fillRect(0, 0, 800, 600);
+        ctx.drawImage(img, ox, oy, dw, dh);
+
+        if (stile === "classico") {
+          const fontSize = 52;
+          ctx.font = `900 ${fontSize}px Impact, Arial Black, sans-serif`;
+          ctx.textAlign = "center";
+          ctx.lineWidth = 5;
+          ctx.strokeStyle = "#000";
+          ctx.fillStyle = "#fff";
+          if (top) {
+            ctx.strokeText(top.toUpperCase(), 400, 60);
+            ctx.fillText(top.toUpperCase(), 400, 60);
+          }
+          if (bottom) {
+            ctx.strokeText(bottom.toUpperCase(), 400, 570);
+            ctx.fillText(bottom.toUpperCase(), 400, 570);
+          }
+        } else if (stile === "moderno") {
+          ctx.fillStyle = "rgba(0,0,0,0.6)";
+          ctx.fillRect(0, 540, 800, 60);
+          ctx.font = "bold 28px Inter, sans-serif";
+          ctx.fillStyle = "#FFD700";
+          ctx.textAlign = "center";
+          if (top) ctx.fillText(top, 400, 520);
+          if (bottom) ctx.fillText(bottom, 400, 580);
+        } else {
+          ctx.fillStyle = "#fff";
+          ctx.strokeStyle = "#000";
+          ctx.lineWidth = 3;
+          const bx = 30, by = 20, bw = 740, bh = 90;
+          ctx.beginPath();
+          ctx.roundRect(bx, by, bw, bh, 20);
+          ctx.fill();
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(100, by + bh);
+          ctx.lineTo(80, by + bh + 30);
+          ctx.lineTo(130, by + bh);
+          ctx.fill();
+          ctx.stroke();
+          ctx.font = "bold 26px Inter, sans-serif";
+          ctx.fillStyle = "#000";
+          ctx.textAlign = "center";
+          if (top) ctx.fillText(top, 400, by + 40);
+          if (bottom) ctx.fillText(bottom, 400, by + 75);
+        }
+
+        ctx.font = "14px Inter, sans-serif";
+        ctx.fillStyle = "rgba(255,255,255,0.5)";
+        ctx.textAlign = "right";
+        ctx.fillText("I Meme di Cairo", 795, 595);
+      };
+    },
+    [dark, stile]
+  );
+
+  const generaCaption = async (imageUrl: string, filename: string) => {
+    const res = await fetch("/api/genera-meme", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filename,
+        imageBase64: uploadedBase64 ?? undefined,
+        scurrile,
+        assurdita,
+        napoletano,
+      }),
+    });
+    if (!res.ok) throw new Error("API 500");
+    return res.json() as Promise<{ topText: string; bottomText: string }>;
+  };
+
+  const fotoRandom = () => {
+    if (uploadedBase64) return { url: uploadedBase64, filename: uploadedFilename ?? "custom" };
+    const f = MEMES[Math.floor(Math.random() * MEMES.length)];
+    return { url: f, filename: f };
+  };
+
+  const generaMeme = async (stessFoto = false) => {
+    setErrorMsg(null);
     setLoading(true);
-    setError("");
-
-    const targetPhoto = newPhoto ? pickRandomMeme(selectedMeme) : selectedMeme;
-    if (newPhoto) {
-      setSelectedMeme(targetPhoto);
-    }
-
+    setModalitaBattaglia(false);
+    setVincitore(null);
     try {
-      const data = await generateCaption(targetPhoto, style);
-      setTopText(data.topText);
-      setBottomText(data.bottomText);
+      const { url, filename } = stessFoto && currentMeme
+        ? { url: currentMeme.imageUrl, filename: currentMeme.filename }
+        : fotoRandom();
+      const { topText, bottomText } = await generaCaption(url, filename);
+      const meme = { filename, imageUrl: url, topText, bottomText };
+      setCurrentMeme(meme);
+      setStoria((s) => [meme, ...s].slice(0, 6));
     } catch {
-      setError("Non sono riuscito a trovare una battuta decente. Riprova.");
+      setErrorMsg("Errore API - controlla le variabili d'ambiente su Vercel");
     } finally {
       setLoading(false);
     }
-  }
+  };
 
-  function onDownload() {
-    const canvas = canvasRef.current;
-    if (!canvas) {
-      return;
+  const avviaBattaglia = async () => {
+    setErrorMsg(null);
+    setLoading(true);
+    setModalitaBattaglia(true);
+    setVincitore(null);
+    try {
+      const foto1 = fotoRandom();
+      const foto2 = fotoRandom();
+      const [r1, r2] = await Promise.all([
+        generaCaption(foto1.url, foto1.filename),
+        generaCaption(foto2.url, foto2.filename),
+      ]);
+      const m1 = { filename: foto1.filename, imageUrl: foto1.url, ...r1 };
+      const m2 = { filename: foto2.filename, imageUrl: foto2.url, ...r2 };
+      setCurrentMeme(m1);
+      setMeme2(m2);
+    } catch {
+      setErrorMsg("Errore battaglia");
+    } finally {
+      setLoading(false);
     }
+  };
 
+  const applicaCustom = () => {
+    if (!currentMeme || !captionCustom.trim()) return;
+    const parole = captionCustom.trim().split(" ");
+    const meta = Math.ceil(parole.length / 2);
+    const top = parole.length > 4 ? parole.slice(0, meta).join(" ") : "";
+    const bottom = parole.length > 4 ? parole.slice(meta).join(" ") : captionCustom;
+    const meme = { ...currentMeme, topText: top, bottomText: bottom };
+    setCurrentMeme(meme);
+  };
+
+  const modificaFotoAI = async () => {
+    if (!istruzione.trim()) return;
+    setErrorMsg(null);
+    setLoadingModifica(true);
+    try {
+      const imageBase64 = uploadedBase64 ?? currentMeme?.imageUrl;
+      if (!imageBase64) throw new Error("Nessuna foto");
+
+      let base64: string;
+      if (imageBase64.startsWith("data:")) {
+        base64 = imageBase64;
+      } else {
+        const r = await fetch(imageBase64);
+        const buf = await r.arrayBuffer();
+        base64 = `data:image/jpeg;base64,${arrayBufferToBase64(buf)}`;
+      }
+
+      const res = await fetch("/api/modifica-foto", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageBase64: base64, istruzione }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+
+      setUploadedBase64(data.imageModificata);
+      setUploadedFilename("foto-modificata");
+      if (currentMeme) setCurrentMeme({ ...currentMeme, imageUrl: data.imageModificata });
+    } catch (e: unknown) {
+      setErrorMsg(e instanceof Error ? e.message : "Errore modifica");
+    } finally {
+      setLoadingModifica(false);
+    }
+  };
+
+  const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const original = ev.target?.result as string;
+      if (file.size > 1_000_000) {
+        const img = new Image();
+        img.src = original;
+        img.onload = () => {
+          const tmp = document.createElement("canvas");
+          const maxSide = 1200;
+          const scale = Math.min(maxSide / img.width, maxSide / img.height, 1);
+          tmp.width = img.width * scale;
+          tmp.height = img.height * scale;
+          tmp.getContext("2d")?.drawImage(img, 0, 0, tmp.width, tmp.height);
+          const compressed = tmp.toDataURL("image/jpeg", 0.8);
+          setUploadedBase64(compressed);
+          setUploadedFilename(file.name);
+        };
+      } else {
+        setUploadedBase64(original);
+        setUploadedFilename(file.name);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const scarica = (ref: React.RefObject<HTMLCanvasElement | null>) => {
     const link = document.createElement("a");
-    link.href = canvas.toDataURL("image/png");
-    link.download = "meme-daniele.png";
+    link.download = "meme-cairo.png";
+    link.href = ref.current?.toDataURL("image/png") ?? "";
     link.click();
-  }
+  };
+
+  const condividiWhatsApp = async () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    if (navigator.share) {
+      canvas.toBlob(async (blob) => {
+        if (!blob) return;
+        const file = new File([blob], "meme-cairo.png", { type: "image/png" });
+        try {
+          await navigator.share({ files: [file], title: "I Meme di Cairo" });
+        } catch {
+          window.open("https://wa.me/?text=Guarda%20questo%20meme%20di%20Cairo!", "_blank");
+        }
+      });
+    } else {
+      window.open("https://wa.me/?text=Guarda%20questo%20meme%20di%20Cairo!", "_blank");
+    }
+  };
+
+  useEffect(() => {
+    if (!currentMeme) return;
+    disegnaCanvas(canvasRef, currentMeme.imageUrl, currentMeme.topText, currentMeme.bottomText);
+  }, [currentMeme, disegnaCanvas]);
+
+  useEffect(() => {
+    if (!meme2 || !modalitaBattaglia) return;
+    disegnaCanvas(canvasBattaglia2Ref, meme2.imageUrl, meme2.topText, meme2.bottomText);
+  }, [meme2, modalitaBattaglia, disegnaCanvas]);
+
+  const bg = dark ? "bg-[#0f0f0f] text-white" : "bg-[#f5f5f5] text-black";
+  const card = dark ? "bg-[#1a1a1a] border-[#333]" : "bg-white border-gray-200";
+  const btn =
+    "px-4 py-2 rounded-2xl font-bold text-sm transition-all active:scale-95 disabled:opacity-40";
 
   return (
-    <main className="min-h-screen px-4 py-8 sm:px-6">
-      <div className="mx-auto w-full max-w-[900px]">
-        <div className="mb-6 flex items-center justify-between">
-          <h1 className="text-3xl font-black tracking-tight sm:text-4xl">
-            I Meme Daniele
-          </h1>
-          <button
-            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            className="rounded-2xl border border-white/20 px-4 py-2 font-semibold"
-            style={cardStyle}
-          >
-            {theme === "dark" ? "Modalita Luce" : "Modalita Buio"}
+    <div className={`min-h-screen ${bg} font-['Inter',sans-serif]`}>
+      <div className="max-w-4xl mx-auto px-4 py-8">
+        <div className="flex justify-between items-center mb-8">
+          <h1 className="text-3xl font-black text-[#FFD700]">I Meme di Cairo</h1>
+          <button onClick={() => setDark(!dark)} className={`${btn} border ${card}`}>
+            {dark ? "Light" : "Dark"}
           </button>
         </div>
 
-        <section
-          className="rounded-3xl border border-black/10 p-4 shadow-xl sm:p-6"
-          style={cardStyle}
-        >
-          <div className="mb-5 flex flex-wrap gap-3">
-            <button
-              onClick={() => onGenerate(true)}
-              className="rounded-2xl bg-[#FFD700] px-6 py-3 text-lg font-black text-black"
-            >
-              🎲 Genera Meme
-            </button>
-
-            <button
-              onClick={() => onGenerate(false)}
-              className="rounded-2xl border border-white/20 px-5 py-3 font-bold"
-              style={cardStyle}
-            >
-              🔄 Rigenera Testo
-            </button>
-
-            <button
-              onClick={() => onGenerate(true)}
-              className="rounded-2xl border border-white/20 px-5 py-3 font-bold"
-              style={cardStyle}
-            >
-              📸 Cambia Foto
-            </button>
-
-            <button
-              onClick={onDownload}
-              className="rounded-2xl border border-white/20 px-5 py-3 font-bold"
-              style={cardStyle}
-            >
-              💾 Scarica PNG
-            </button>
+        {errorMsg && (
+          <div className="mb-4 p-3 bg-red-900/50 border border-red-500 rounded-xl text-red-300 text-sm">
+            {errorMsg}
           </div>
+        )}
 
-          <div className="mb-5">
-            <label htmlFor="style" className="mb-2 block text-sm font-semibold">
-              Stile Meme
-            </label>
-            <select
-              id="style"
-              value={style}
-              onChange={(e) => setStyle(e.target.value as MemeStyle)}
-              className="w-full rounded-2xl border border-white/20 px-4 py-3"
-              style={cardStyle}
-            >
-              <option value="classico">Classico</option>
-              <option value="moderno">Moderno</option>
-              <option value="speech">Speech bubble</option>
-            </select>
-          </div>
-
-          <div className="overflow-hidden rounded-3xl border border-black/20">
+        {!modalitaBattaglia ? (
+          <div className={`rounded-2xl overflow-hidden border ${card} mb-4`}>
             <canvas
               ref={canvasRef}
-              width={CANVAS_WIDTH}
-              height={CANVAS_HEIGHT}
-              className="h-auto w-full"
+              className="w-full"
+              style={{ display: currentMeme ? "block" : "none" }}
             />
+            {!currentMeme && (
+              <div className="h-64 flex items-center justify-center text-gray-500">
+                Premi Genera Meme per iniziare
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            {[
+              { ref: canvasRef, meme: currentMeme, num: 1 as const },
+              { ref: canvasBattaglia2Ref, meme: meme2, num: 2 as const },
+            ].map(({ ref, num }) => (
+              <div key={num} className={`rounded-2xl overflow-hidden border ${card} ${vincitore === num ? "ring-4 ring-[#FFD700]" : ""}`}>
+                <canvas ref={ref} className="w-full" />
+                {vincitore === null ? (
+                  <button
+                    onClick={() => setVincitore(num)}
+                    className={`w-full ${btn} bg-[#FFD700] text-black mt-2`}
+                  >
+                    Questo vince!
+                  </button>
+                ) : vincitore === num ? (
+                  <div className="text-center py-2 font-black text-[#FFD700]">IL VINCITORE!</div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-2 mb-6">
+          <button
+            onClick={() => generaMeme()}
+            disabled={loading}
+            className={`${btn} bg-[#FFD700] text-black text-base px-6 py-3`}
+          >
+            {loading ? "Sto pensando qualcosa di stupido..." : "Genera Meme"}
+          </button>
+          <button onClick={avviaBattaglia} disabled={loading} className={`${btn} bg-purple-600 text-white`}>
+            Battaglia
+          </button>
+          <button onClick={() => generaMeme(true)} disabled={loading || !currentMeme} className={`${btn} border ${card}`}>
+            Rigenera testo
+          </button>
+          <button onClick={() => { setUploadedBase64(null); generaMeme(); }} disabled={loading} className={`${btn} border ${card}`}>
+            Cambia foto
+          </button>
+          {(vincitore === 1 || !modalitaBattaglia) && currentMeme && (
+            <>
+              <button onClick={() => scarica(canvasRef)} className={`${btn} border ${card}`}>Scarica</button>
+              <button onClick={condividiWhatsApp} className={`${btn} bg-[#25D366] text-white`}>WhatsApp</button>
+            </>
+          )}
+          {vincitore === 2 && meme2 && (
+            <button onClick={() => scarica(canvasBattaglia2Ref)} className={`${btn} border ${card}`}>Scarica vincitore</button>
+          )}
+        </div>
+
+        <div className={`rounded-2xl border ${card} p-4 mb-4`}>
+          <p className="font-bold mb-2">Carica la tua foto</p>
+          <div className="flex items-center gap-3">
+            <label className={`${btn} bg-[#FFD700] text-black cursor-pointer`}>
+              Scegli foto
+              <input type="file" accept="image/*" onChange={handleUpload} className="hidden" />
+            </label>
+            {uploadedFilename && (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-green-400">{uploadedFilename}</span>
+                <button onClick={() => { setUploadedBase64(null); setUploadedFilename(null); }}
+                  className="text-xs text-red-400 hover:text-red-300">rimuovi</button>
+              </div>
+            )}
+          </div>
+          {uploadedBase64 && (
+            <p className="text-xs text-gray-500 mt-1">
+              La foto caricata sara usata al posto di quelle random
+            </p>
+          )}
+        </div>
+
+        <div className={`rounded-2xl border ${card} p-4 mb-4`}>
+          <p className="font-bold mb-1">Modifica foto con AI</p>
+          <p className="text-xs text-gray-500 mb-3">
+            Powered by Hugging Face - La foto viene trasformata visivamente dall&apos;AI
+          </p>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={istruzione}
+              onChange={(e) => setIstruzione(e.target.value)}
+              placeholder="Es: aggiungi occhiali da sole, metti un cappello..."
+              className={`flex-1 rounded-xl px-3 py-2 text-sm border ${card} bg-transparent`}
+            />
+            <button
+              onClick={modificaFotoAI}
+              disabled={loadingModifica || (!uploadedBase64 && !currentMeme)}
+              className={`${btn} bg-purple-600 text-white whitespace-nowrap`}
+            >
+              {loadingModifica ? "Modifica..." : "Modifica"}
+            </button>
+            <button
+              onClick={() => generaMeme(true)}
+              disabled={loading || !currentMeme}
+              className={`${btn} bg-[#FFD700] text-black whitespace-nowrap`}
+            >
+              Genera Meme
+            </button>
+          </div>
+          <p className="text-xs text-gray-500 mt-2">
+            Il modello puo impiegare 20-40 secondi al primo avvio (cold start)
+          </p>
+        </div>
+
+        <div className={`rounded-2xl border ${card} p-4 mb-4`}>
+          <p className="font-bold mb-2">Scrivi il tuo testo</p>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={captionCustom}
+              onChange={(e) => setCaptionCustom(e.target.value)}
+              maxLength={100}
+              placeholder="Scrivi il tuo testo per il meme..."
+              className={`flex-1 rounded-xl px-3 py-2 text-sm border ${card} bg-transparent`}
+            />
+            <button onClick={applicaCustom} disabled={!currentMeme} className={`${btn} bg-[#FFD700] text-black`}>
+              Applica
+            </button>
+          </div>
+        </div>
+
+        <div className={`rounded-2xl border ${card} p-4 mb-4`}>
+          <p className="font-bold mb-3">Stile e Opzioni</p>
+
+          <div className="flex gap-2 mb-4">
+            {(["classico", "moderno", "bubble"] as Stile[]).map((s) => (
+              <button
+                key={s}
+                onClick={() => setStile(s)}
+                className={`${btn} border capitalize ${stile === s ? "bg-[#FFD700] text-black border-[#FFD700]" : card}`}
+              >
+                {s === "classico" ? "Classico" : s === "moderno" ? "Moderno" : "Bubble"}
+              </button>
+            ))}
           </div>
 
-          {loading ? (
-            <div className="mt-4 flex items-center gap-3 text-sm" style={{ color: "var(--muted)" }}>
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-              Sto pensando qualcosa di stupido...
-            </div>
-          ) : null}
+          <div className="flex gap-6 mb-4">
+            {[
+              { label: "Scurrile", val: scurrile, set: setScurrile },
+              { label: "Napoletano", val: napoletano, set: setNapoletano },
+            ].map(({ label, val, set }) => (
+              <label key={label} className="flex items-center gap-2 cursor-pointer select-none">
+                <div
+                  onClick={() => set(!val)}
+                  className={`w-11 h-6 rounded-full transition-colors ${val ? "bg-[#FFD700]" : "bg-gray-600"} relative`}
+                >
+                  <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${val ? "left-6" : "left-1"}`} />
+                </div>
+                <span className="text-sm">{label}</span>
+              </label>
+            ))}
+          </div>
 
-          {error ? (
-            <p className="mt-4 text-sm font-semibold text-red-500">{error}</p>
-          ) : null}
-        </section>
+          <div>
+            <label className="text-sm font-medium">
+              Livello Assurdita: <span className="text-[#FFD700] font-black">{assurdita}</span>
+            </label>
+            <input
+              type="range" min={1} max={10} value={assurdita}
+              onChange={(e) => setAssurdita(Number(e.target.value))}
+              className="w-full mt-1 accent-[#FFD700]"
+            />
+            <div className="flex justify-between text-xs text-gray-500 mt-1">
+              <span>1 - Normale</span>
+              <span>5 - Surreale</span>
+              <span>10 - Folle</span>
+            </div>
+          </div>
+        </div>
+
+        {storia.length > 1 && (
+          <div className={`rounded-2xl border ${card} p-4`}>
+            <p className="font-bold mb-3">Ultimi meme</p>
+            <div className="grid grid-cols-3 gap-2">
+              {storia.slice(1).map((m, i) => (
+                <button
+                  key={i}
+                  onClick={() => setCurrentMeme(m)}
+                  className="rounded-xl overflow-hidden border border-[#333] hover:border-[#FFD700] transition-all"
+                >
+                  <img src={m.imageUrl} alt="" className="w-full h-20 object-cover" />
+                  <p className="text-xs p-1 truncate">{m.bottomText}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
-    </main>
+    </div>
   );
 }
